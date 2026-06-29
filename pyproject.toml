@@ -1,0 +1,13 @@
+[project]
+name = "cocktail-recommender"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi",
+    "sentence-transformers",
+    "psycopg2-binary",
+    "pgvector",
+    "pandas",
+    "uvicorn",
+    "tqdm",
+]
