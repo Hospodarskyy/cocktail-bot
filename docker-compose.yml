@@ -36,7 +36,11 @@ services:
       - minio_data:/data
 
   api:
-    build: .
+    build:
+      context: .
+      args:
+        KAGGLE_USERNAME: ${KAGGLE_USERNAME}
+        KAGGLE_KEY: ${KAGGLE_KEY}
     ports:
       - "8000:8000"
     environment:
