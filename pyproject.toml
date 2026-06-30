@@ -10,4 +10,9 @@ dependencies = [
     "pandas",
     "uvicorn",
     "tqdm",
+    "requests>=2.34.2",
+    "python-telegram-bot>=22.8",
+    "python-dotenv>=1.2.2",
+    "anthropic>=0.113.0",
+    "openai>=2.44.0",
 ]

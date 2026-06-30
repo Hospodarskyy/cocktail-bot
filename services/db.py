@@ -29,6 +29,36 @@ def init_db():
         );
     """)
 
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id BIGINT PRIMARY KEY,
+            name TEXT,
+            preferences_text TEXT,
+            embedding vector(384)
+        );
+    """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS orders (
+            id SERIAL PRIMARY KEY,
+            user_id BIGINT REFERENCES users(id),
+            cocktail_id INTEGER REFERENCES cocktails(id),
+            preferences TEXT,
+            created_at TIMESTAMP DEFAULT NOW()
+        );
+    """)
+
+    cur.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pending';")
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS feedback (
+            id SERIAL PRIMARY KEY,
+            user_id BIGINT REFERENCES users(id),
+            cocktail_id INTEGER REFERENCES cocktails(id),
+            created_at TIMESTAMP DEFAULT NOW()
+        );
+    """)
+
     conn.commit()
     cur.close()
     conn.close()
