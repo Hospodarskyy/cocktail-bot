@@ -29,6 +29,9 @@ def init_db():
         );
     """)
 
+    cur.execute("ALTER TABLE cocktails ADD COLUMN IF NOT EXISTS required_ingredients TEXT[];")
+    cur.execute("ALTER TABLE cocktails ADD COLUMN IF NOT EXISTS categories TEXT[];")
+
     cur.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id BIGINT PRIMARY KEY,
@@ -49,6 +52,11 @@ def init_db():
     """)
 
     cur.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pending';")
+    cur.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS ingredients_text TEXT;")
+    cur.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS instructions_text TEXT;")
+    cur.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS story_text TEXT;")
+    cur.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS adjustments_text TEXT;")
+    cur.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS ingredients_json TEXT;")
 
     cur.execute("""
         CREATE TABLE IF NOT EXISTS feedback (
@@ -58,6 +66,23 @@ def init_db():
             created_at TIMESTAMP DEFAULT NOW()
         );
     """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS inventory (
+            id SERIAL PRIMARY KEY,
+            ingredient_name TEXT NOT NULL,
+            quantity NUMERIC NOT NULL DEFAULT 0,
+            unit TEXT,
+            updated_at TIMESTAMP DEFAULT NOW()
+        );
+    """)
+
+    cur.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS inventory_ingredient_name_key
+        ON inventory (LOWER(ingredient_name));
+    """)
+
+    cur.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS category TEXT;")
 
     conn.commit()
     cur.close()

@@ -13,12 +13,11 @@ def load_hotaling_data(csv_path: str):
     inserted = 0
     for _, row in df.iterrows():
         cur.execute("""
-            INSERT INTO cocktails (name, category, ingredients, garnish, instructions)
-            VALUES (%s, %s, %s, %s, %s)
+            INSERT INTO cocktails (name, ingredients, garnish, instructions)
+            VALUES (%s, %s, %s, %s)
             ON CONFLICT DO NOTHING
         """, (
             row["Cocktail Name"],
-            row.get("Bar/Company", ""),
             row["Ingredients"],
             row.get("Garnish", ""),
             row.get("Preparation", "")

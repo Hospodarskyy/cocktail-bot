@@ -3,8 +3,11 @@ from .db import get_connection
 
 model = SentenceTransformer("all-MiniLM-L6-v2")
 
+def embed_preferences(text: str):
+    return model.encode(text).tolist()
+
 def onboard_user(user_id: int, name: str, preferences: str):
-    embedding = model.encode(preferences).tolist()
+    embedding = embed_preferences(preferences)
 
     conn = get_connection()
     cur = conn.cursor()
@@ -22,11 +25,11 @@ def onboard_user(user_id: int, name: str, preferences: str):
     cur.close()
     conn.close()
 
-def get_user_embedding(user_id: int):
+def get_user_profile(user_id: int):
     conn = get_connection()
     cur = conn.cursor()
 
-    cur.execute("SELECT embedding FROM users WHERE id = %s", (user_id,))
+    cur.execute("SELECT preferences_text, embedding FROM users WHERE id = %s", (user_id,))
     result = cur.fetchone()
 
     cur.close()
@@ -34,7 +37,35 @@ def get_user_embedding(user_id: int):
 
     if result is None:
         return None
-    return result[0]
+    return {"preferences_text": result[0], "embedding": result[1]}
+
+def get_user(user_id: int):
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("SELECT name, preferences_text FROM users WHERE id = %s", (user_id,))
+    result = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    if result is None:
+        return None
+    return {"name": result[0], "preferences": result[1]}
+
+def clear_preferences(user_id: int):
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("UPDATE users SET preferences_text = NULL, embedding = NULL WHERE id = %s", (user_id,))
+    found = cur.rowcount > 0
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    if not found:
+        raise ValueError("User not found.")
 
 def list_recent_users(limit: int = 10):
     conn = get_connection()

@@ -47,6 +47,7 @@ services:
       - DB_HOST=postgres
       - ADMIN_BOT_TOKEN=${ADMIN_BOT_TOKEN}
       - ADMIN_CHAT_ID=${ADMIN_CHAT_ID}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
     depends_on:
       - postgres
 

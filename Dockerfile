@@ -1,4 +1,4 @@
-FROM python:3.14-slim
+FROM python:3.12-slim
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
@@ -11,7 +11,7 @@ COPY . .
 
 ARG KAGGLE_USERNAME
 ARG KAGGLE_KEY
-RUN pip install kaggle && \
+RUN pip install kaggle==1.6.17 && \
     mkdir -p /root/.kaggle && \
     echo "{\"username\":\"$KAGGLE_USERNAME\",\"key\":\"$KAGGLE_KEY\"}" > /root/.kaggle/kaggle.json && \
     chmod 600 /root/.kaggle/kaggle.json && \
