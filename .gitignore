@@ -6,3 +6,4 @@ models/
 .env
 aws/
 awscliv2.zip
+*.pem
