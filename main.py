@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from services.recommender import recommend, recommend_from_text, cocktail_summary, cocktails_in_category
 from services.db import init_db, get_connection
 from services.data_loader import load_hotaling_data
+from services.dataset_fetch import ensure_dataset_downloaded
 from services.flavor import generate_flavor_descriptions
 from services.required_ingredients import generate_required_ingredients
 from services.embedder import generate_embeddings
@@ -31,7 +32,8 @@ async def lifespan(app: FastAPI):
     conn.close()
     
     if count == 0:
-        load_hotaling_data("data/cocktail-dataset.csv")
+        dataset_path = ensure_dataset_downloaded("data/cocktail-dataset.csv")
+        load_hotaling_data(dataset_path)
 
     generate_flavor_descriptions()
     generate_required_ingredients()

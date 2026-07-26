@@ -4,10 +4,11 @@ import os
 def get_connection():
     return psycopg2.connect(
         host=os.getenv("DB_HOST", "localhost"),
-        port=5432,
-        dbname="cocktail_db",
-        user="cocktail",
-        password="cocktail"
+        port=os.getenv("DB_PORT", "5432"),
+        dbname=os.getenv("DB_NAME", "cocktail_db"),
+        user=os.getenv("DB_USER", "cocktail"),
+        password=os.getenv("DB_PASSWORD", "cocktail"),
+        sslmode=os.getenv("DB_SSLMODE", "prefer")
     )
 
 def init_db():
