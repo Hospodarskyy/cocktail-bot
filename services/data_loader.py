@@ -1,3 +1,4 @@
+import os
 import pandas as pd
 from .db import get_connection
 
@@ -6,6 +7,10 @@ def load_hotaling_data(csv_path: str):
 
     df = df.dropna(subset=["Cocktail Name", "Ingredients"])
     df = df.fillna("")
+
+    limit = os.getenv("COCKTAIL_LOAD_LIMIT")
+    if limit:
+        df = df.head(int(limit))
 
     conn = get_connection()
     cur = conn.cursor()

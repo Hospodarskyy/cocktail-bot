@@ -33,6 +33,54 @@ services:
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-eu-central-1}
 
+  admin_bot:
+    build:
+      context: .
+    environment:
+      - ADMIN_BOT_TOKEN=${ADMIN_BOT_TOKEN}
+      - ADMIN_USER_IDS=${ADMIN_USER_IDS}
+      - ADMIN_CHAT_ID=${ADMIN_CHAT_ID}
+      - API_BASE_URL=http://api:8000
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+    command: ["uv", "run", "python", "-m", "services.bot.admin_main"]
+    depends_on:
+      - api
+
+  guest_bot:
+    build:
+      context: .
+    environment:
+      - GUEST_BOT_TOKEN=${GUEST_BOT_TOKEN}
+      - API_BASE_URL=http://api:8000
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+    command: ["uv", "run", "python", "-m", "services.bot.guest_main"]
+    depends_on:
+      - api
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:latest
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlflow_data:/mlflow
+    environment:
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-eu-central-1}
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        pip install boto3 --quiet
+        mlflow server \
+          --backend-store-uri sqlite:////mlflow/mlflow.db \
+          --default-artifact-root s3://cocktail-mlops-artifacts-oles/mlflow-artifacts \
+          --host 0.0.0.0 \
+          --port 5000 \
+          --allowed-hosts "*"
+
   airflow-init:
     image: apache/airflow:2.9.0
     environment:
@@ -86,6 +134,8 @@ services:
       DB_PASSWORD: ${DB_PASSWORD}
       DB_SSLMODE: ${DB_SSLMODE:-require}
       DATASET_BUCKET: ${DATASET_BUCKET:-cocktail-mlops-data-oles}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
       AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-eu-central-1}
     volumes:
       - ./dags:/opt/airflow/dags
@@ -95,3 +145,4 @@ services:
 
 volumes:
   airflow_postgres_data:
+  mlflow_data:

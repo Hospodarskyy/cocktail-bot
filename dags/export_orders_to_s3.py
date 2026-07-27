@@ -7,9 +7,9 @@ import pandas as pd
 import boto3
 from io import StringIO
 
-def export_orders_to_s3():
-    # Підключення до PostgreSQL (RDS)
-    conn = psycopg2.connect(
+
+def _get_connection():
+    return psycopg2.connect(
         host=os.getenv("DB_HOST"),
         port=os.getenv("DB_PORT", "5432"),
         dbname=os.getenv("DB_NAME", "cocktail_db"),
@@ -17,26 +17,36 @@ def export_orders_to_s3():
         password=os.getenv("DB_PASSWORD"),
         sslmode=os.getenv("DB_SSLMODE", "prefer")
     )
-    
-    # Читаємо дані
-    df = pd.read_sql("SELECT id, name, ingredients, garnish, instructions FROM cocktails", conn)
-    conn.close()
-    
-    # Конвертуємо в CSV
+
+
+def _upload_df_to_s3(df, bucket, key, s3_client):
     csv_buffer = StringIO()
     df.to_csv(csv_buffer, index=False)
+    s3_client.put_object(Bucket=bucket, Key=key, Body=csv_buffer.getvalue())
 
-    # Завантажуємо в S3 (креденшли беруться з IAM-ролі EC2, нічого не хардкодимо)
+
+def export_orders_to_s3():
+    conn = _get_connection()
+
+    orders_df = pd.read_sql(
+        "SELECT user_id, cocktail_id, created_at FROM orders WHERE cocktail_id IS NOT NULL", conn
+    )
+    cocktails_df = pd.read_sql(
+        "SELECT id, categories FROM cocktails WHERE categories IS NOT NULL", conn
+    )
+    conn.close()
+
     bucket = os.getenv("DATASET_BUCKET", "cocktail-mlops-data-oles")
     s3_client = boto3.client("s3", region_name=os.getenv("AWS_DEFAULT_REGION", "eu-central-1"))
 
-    s3_client.put_object(
-        Bucket=bucket,
-        Key=f"order-history/cocktails_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-        Body=csv_buffer.getvalue()
-    )
+    # Fixed (non-timestamped) keys — training always wants the current snapshot,
+    # not historical versions, so each run simply overwrites the previous export.
+    _upload_df_to_s3(orders_df, bucket, "order-history/orders.csv", s3_client)
+    _upload_df_to_s3(cocktails_df, bucket, "order-history/cocktails_categories.csv", s3_client)
 
-    print(f"Exported {len(df)} cocktails to s3://{bucket}/order-history/")
+    print(f"Exported {len(orders_df)} orders and {len(cocktails_df)} cocktail categories "
+          f"to s3://{bucket}/order-history/")
+
 
 with DAG(
     dag_id="export_orders_to_s3",
@@ -44,8 +54,8 @@ with DAG(
     schedule="@daily",
     catchup=False
 ) as dag:
-    
+
     export_task = PythonOperator(
-        task_id="export_cocktails",
+        task_id="export_orders",
         python_callable=export_orders_to_s3
     )
