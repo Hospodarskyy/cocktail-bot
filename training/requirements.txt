@@ -1,0 +1,8 @@
+mlflow
+sagemaker-mlflow
+boto3
+scipy
+joblib
+pandas
+numpy
+implicit

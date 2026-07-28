@@ -59,28 +59,6 @@ services:
     depends_on:
       - api
 
-  mlflow:
-    image: ghcr.io/mlflow/mlflow:latest
-    ports:
-      - "5000:5000"
-    volumes:
-      - mlflow_data:/mlflow
-    environment:
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-eu-central-1}
-    entrypoint: /bin/bash
-    command:
-      - -c
-      - |
-        pip install boto3 --quiet
-        mlflow server \
-          --backend-store-uri sqlite:////mlflow/mlflow.db \
-          --default-artifact-root s3://cocktail-mlops-artifacts-oles/mlflow-artifacts \
-          --host 0.0.0.0 \
-          --port 5000 \
-          --allowed-hosts "*"
-
   airflow-init:
     image: apache/airflow:2.9.0
     environment:
@@ -117,7 +95,8 @@ services:
     volumes:
       - ./dags:/opt/airflow/dags
     depends_on:
-      - airflow-init
+      airflow-init:
+        condition: service_completed_successfully
     command: webserver
 
   airflow-scheduler:
@@ -140,9 +119,9 @@ services:
     volumes:
       - ./dags:/opt/airflow/dags
     depends_on:
-      - airflow-init
+      airflow-init:
+        condition: service_completed_successfully
     command: scheduler
 
 volumes:
   airflow_postgres_data:
-  mlflow_data:

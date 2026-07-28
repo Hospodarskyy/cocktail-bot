@@ -1,19 +1,19 @@
 """
 Collaborative filtering training pipeline for the cocktail recommender.
 
-Trains three candidate models (popularity baseline, ALS, truncated SVD)
-on implicit user-cocktail interactions, evaluates each with precision@5,
-logs everything to MLflow, and promotes the best one to the "champion"
-alias in the MLflow Model Registry if it beats the current champion.
+Trains candidate models (popularity baseline, SVD, ALS, BPR, and a tuned
+variant of ALS/BPR) on implicit user-cocktail interactions, evaluates each
+with precision@K, logs everything to MLflow, and promotes the best one to
+the "champion" alias in the MLflow Model Registry if it beats the current
+champion.
 
 Reads its input data (orders + cocktail categories) from S3, where the
 `export_orders_to_s3` Airflow DAG deposits fresh CSV snapshots daily —
 not from RDS directly, since this script is designed to run inside a
 SageMaker Training Job with no VPC access to the database.
 
-Run locally (e.g. in Codespace, against the EC2 MLflow server):
-    export MLFLOW_TRACKING_URI=http://<ec2-ip>:5000
-    export AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=...
+Run locally (e.g. in Codespace, or manually inside a SageMaker Training Job):
+    export MLFLOW_TRACKING_URI=<sagemaker-mlflow-tracking-server-arn-or-url>
     export DATASET_BUCKET=cocktail-mlops-data-oles
     python -m training.train_cf
 """
@@ -32,17 +32,19 @@ from scipy.sparse import csr_matrix
 from scipy.sparse.linalg import svds
 
 MLFLOW_EXPERIMENT = "cf_recommender_comparison"
-MODEL_REGISTRY_NAME = "cf_recommender"
+MODEL_REGISTRY_NAME = "cf-recommender"  # hyphens only - SageMaker Managed MLflow requirement
 DATASET_BUCKET = os.getenv("DATASET_BUCKET", "cocktail-mlops-data-oles")
 ORDERS_KEY = "order-history/orders.csv"
 COCKTAILS_CATEGORIES_KEY = "order-history/cocktails_categories.csv"
 MIN_REAL_ORDERS = 50          # below this, we bootstrap with synthetic orders
-N_SYNTHETIC_USERS = 60
+N_SYNTHETIC_USERS = 300
 ORDERS_PER_SYNTHETIC_USER = (3, 8)
 N_FACTORS = 20
 TOP_K = 5
+K_VALUES = [5, 10, 20, 30]
 TEST_FRACTION = 0.2
 RANDOM_SEED = 42
+TUNING_GRID = {"factors": [10, 20, 40], "regularization": [0.01, 0.1, 0.5]}
 
 
 # ---------------------------------------------------------------------------
@@ -174,20 +176,33 @@ def train_test_split_interactions(interactions):
 # Models
 # ---------------------------------------------------------------------------
 
-def train_popularity(train_matrix, items):
+def train_popularity(train_matrix):
     popularity = np.asarray(train_matrix.sum(axis=0)).flatten()
-    ranked_items = [items[idx] for idx in np.argsort(-popularity)]
-    return {"type": "popularity", "ranked_items": ranked_items}
+    ranked_indices = list(np.argsort(-popularity))
+    return {"type": "popularity", "ranked_indices": ranked_indices}
 
 
 def recommend_popularity(model, user_idx, k):
-    return model["ranked_items"][:k]
+    return model["ranked_indices"][:k]
 
 
-def train_als(train_matrix):
+def train_svd(train_matrix, n_factors=N_FACTORS):
+    k = max(min(n_factors, min(train_matrix.shape) - 1), 2)
+    u, s, vt = svds(train_matrix.astype(float), k=k)
+    return {"type": "svd", "u": u, "s": s, "vt": vt}
+
+
+def recommend_svd(model, user_idx, k):
+    scores = model["u"][user_idx] @ np.diag(model["s"]) @ model["vt"]
+    return list(np.argsort(-scores)[:k])
+
+
+def train_als(train_matrix, n_factors=N_FACTORS, regularization=0.1):
     from implicit.als import AlternatingLeastSquares
 
-    model = AlternatingLeastSquares(factors=N_FACTORS, regularization=0.1, iterations=15, random_state=RANDOM_SEED)
+    model = AlternatingLeastSquares(
+        factors=n_factors, regularization=regularization, iterations=15, random_state=RANDOM_SEED
+    )
     model.fit(train_matrix)
     return {"type": "als", "model": model}
 
@@ -199,16 +214,21 @@ def recommend_als(model, train_matrix, user_idx, k):
     return list(item_ids)
 
 
-def train_svd(train_matrix):
-    k = min(N_FACTORS, min(train_matrix.shape) - 1)
-    k = max(k, 2)
-    u, s, vt = svds(train_matrix.astype(float), k=k)
-    return {"type": "svd", "u": u, "s": s, "vt": vt}
+def train_bpr(train_matrix, n_factors=N_FACTORS, regularization=0.01):
+    from implicit.bpr import BayesianPersonalizedRanking
+
+    model = BayesianPersonalizedRanking(
+        factors=n_factors, regularization=regularization, iterations=100, random_state=RANDOM_SEED
+    )
+    model.fit(train_matrix)
+    return {"type": "bpr", "model": model}
 
 
-def recommend_svd(model, user_idx, k):
-    scores = model["u"][user_idx] @ np.diag(model["s"]) @ model["vt"]
-    return list(np.argsort(-scores)[:k])
+def recommend_bpr(model, train_matrix, user_idx, k):
+    item_ids, _ = model["model"].recommend(
+        user_idx, train_matrix[user_idx], N=k, filter_already_liked_items=True
+    )
+    return list(item_ids)
 
 
 # ---------------------------------------------------------------------------
@@ -226,14 +246,18 @@ def precision_at_k(recommend_fn, test_by_user, k=TOP_K):
     return hits / total if total else 0.0
 
 
+def evaluate_all_k(recommend_fn, test_by_user, k_values=K_VALUES):
+    return {f"precision_at_{k}": precision_at_k(recommend_fn, test_by_user, k=k) for k in k_values}
+
+
 # ---------------------------------------------------------------------------
 # MLflow logging + champion-challenger
 # ---------------------------------------------------------------------------
 
-def log_and_maybe_promote(run_name, params, metric_value, model_obj, client):
+def log_model_run(run_name, model_obj, params, metrics_dict):
     with mlflow.start_run(run_name=run_name):
         mlflow.log_params(params)
-        mlflow.log_metric("precision_at_5", metric_value)
+        mlflow.log_metrics(metrics_dict)
 
         local_path = f"/tmp/{run_name}.joblib"
         joblib.dump(model_obj, local_path)
@@ -241,11 +265,16 @@ def log_and_maybe_promote(run_name, params, metric_value, model_obj, client):
 
         run_id = mlflow.active_run().info.run_id
 
-    return run_id, metric_value
+    return run_id, metrics_dict["precision_at_5"]
 
 
 def register_if_champion(client, run_id, metric_value, model_name=MODEL_REGISTRY_NAME):
     model_uri = f"runs:/{run_id}/model"
+
+    try:
+        client.create_registered_model(model_name)
+    except Exception:
+        pass  # already exists, that's fine
 
     try:
         current_champion = client.get_model_version_by_alias(model_name, "champion")
@@ -253,11 +282,14 @@ def register_if_champion(client, run_id, metric_value, model_name=MODEL_REGISTRY
             client.get_run(current_champion.run_id).data.metrics.get("precision_at_5", -1)
         )
     except Exception:
-        current_champion = None
         current_metric = -1
 
     if metric_value > current_metric:
-        new_version = mlflow.register_model(model_uri, model_name)
+        # Use create_model_version directly rather than mlflow.register_model():
+        # the latter requires a "Logged Model" entity (MLflow 3.x concept) that
+        # our simple log_artifact() calls don't create, and fails against
+        # SageMaker Managed MLflow with "Unable to find a logged_model".
+        new_version = client.create_model_version(name=model_name, source=model_uri, run_id=run_id)
         client.set_registered_model_alias(model_name, "champion", new_version.version)
         print(f"New champion: version {new_version.version} "
               f"(precision@5={metric_value:.4f} > previous {current_metric:.4f})")
@@ -273,13 +305,16 @@ def register_if_champion(client, run_id, metric_value, model_name=MODEL_REGISTRY
 # ---------------------------------------------------------------------------
 
 def main():
-    mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000"))
+    tracking_uri = os.getenv("MLFLOW_TRACKING_URI")
+    if not tracking_uri:
+        raise RuntimeError("MLFLOW_TRACKING_URI environment variable is required")
+
+    mlflow.set_tracking_uri(tracking_uri)
     mlflow.set_experiment(MLFLOW_EXPERIMENT)
     client = mlflow.MlflowClient()
 
     interactions, used_synthetic = build_interaction_data()
     train_interactions, test_interactions = train_test_split_interactions(interactions)
-
     train_matrix, users, items, user_index, item_index = build_matrix(train_interactions)
 
     test_by_user = defaultdict(list)
@@ -298,33 +333,50 @@ def main():
     results = []
 
     # --- Popularity baseline ---
-    pop_model = train_popularity(train_matrix, items)
-    pop_metric = precision_at_k(lambda uidx, k: recommend_popularity(pop_model, uidx, k), test_by_user)
-    run_id, metric = log_and_maybe_promote(
-        "popularity_baseline", {**base_params, "algorithm": "popularity"}, pop_metric, pop_model, client
-    )
-    results.append((run_id, metric))
-
-    # --- ALS ---
-    try:
-        als_model = train_als(train_matrix)
-        als_metric = precision_at_k(
-            lambda uidx, k: recommend_als(als_model, train_matrix, uidx, k), test_by_user
-        )
-        run_id, metric = log_and_maybe_promote(
-            "als", {**base_params, "algorithm": "als", "factors": N_FACTORS}, als_metric, als_model, client
-        )
-        results.append((run_id, metric))
-    except ImportError:
-        print("`implicit` package not installed, skipping ALS")
+    pop_model = train_popularity(train_matrix)
+    metrics = evaluate_all_k(lambda u, k: recommend_popularity(pop_model, u, k), test_by_user)
+    results.append(log_model_run("popularity", pop_model, {**base_params, "algorithm": "popularity"}, metrics))
 
     # --- SVD ---
     svd_model = train_svd(train_matrix)
-    svd_metric = precision_at_k(lambda uidx, k: recommend_svd(svd_model, uidx, k), test_by_user)
-    run_id, metric = log_and_maybe_promote(
-        "svd", {**base_params, "algorithm": "svd", "factors": N_FACTORS}, svd_metric, svd_model, client
+    metrics = evaluate_all_k(lambda u, k: recommend_svd(svd_model, u, k), test_by_user)
+    results.append(log_model_run("svd", svd_model, {**base_params, "algorithm": "svd", "factors": N_FACTORS}, metrics))
+
+    # --- ALS (default params) ---
+    als_model = train_als(train_matrix)
+    metrics = evaluate_all_k(lambda u, k: recommend_als(als_model, train_matrix, u, k), test_by_user)
+    results.append(log_model_run("als", als_model, {**base_params, "algorithm": "als", "factors": N_FACTORS}, metrics))
+
+    # --- BPR (default params) ---
+    bpr_model = train_bpr(train_matrix)
+    metrics = evaluate_all_k(lambda u, k: recommend_bpr(bpr_model, train_matrix, u, k), test_by_user)
+    results.append(log_model_run("bpr", bpr_model, {**base_params, "algorithm": "bpr", "factors": N_FACTORS}, metrics))
+
+    # --- Hyperparameter tuning: grid search over ALS and BPR ---
+    best_tuned = None  # (algo, factors, reg, precision_at_5, model_obj)
+    for factors in TUNING_GRID["factors"]:
+        for reg in TUNING_GRID["regularization"]:
+            als_tuned = train_als(train_matrix, n_factors=factors, regularization=reg)
+            score = precision_at_k(lambda u, k: recommend_als(als_tuned, train_matrix, u, k), test_by_user)
+            if best_tuned is None or score > best_tuned[3]:
+                best_tuned = ("als", factors, reg, score, als_tuned)
+
+            bpr_tuned = train_bpr(train_matrix, n_factors=factors, regularization=reg)
+            score = precision_at_k(lambda u, k: recommend_bpr(bpr_tuned, train_matrix, u, k), test_by_user)
+            if best_tuned is None or score > best_tuned[3]:
+                best_tuned = ("bpr", factors, reg, score, bpr_tuned)
+
+    tuned_algo, tuned_factors, tuned_reg, _, tuned_model = best_tuned
+    recommend_tuned = (
+        (lambda u, k: recommend_als(tuned_model, train_matrix, u, k)) if tuned_algo == "als"
+        else (lambda u, k: recommend_bpr(tuned_model, train_matrix, u, k))
     )
-    results.append((run_id, metric))
+    metrics = evaluate_all_k(recommend_tuned, test_by_user)
+    results.append(log_model_run(
+        f"{tuned_algo}_tuned", tuned_model,
+        {**base_params, "algorithm": tuned_algo, "factors": tuned_factors, "regularization": tuned_reg},
+        metrics
+    ))
 
     # --- Champion selection: best of this batch vs current registry champion ---
     best_run_id, best_metric = max(results, key=lambda r: r[1])
