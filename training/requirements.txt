@@ -1,4 +1,4 @@
-mlflow
+mlflow==3.10.1
 sagemaker-mlflow
 boto3
 scipy
