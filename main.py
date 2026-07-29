@@ -19,6 +19,7 @@ from services.inventory import upsert_ingredient, list_inventory, remove_ingredi
 from services.inventory_categorize import generate_inventory_categories
 from services.cocktail_category import generate_cocktail_categories
 from services.cocktails import create_cocktail
+from services.model_registry import reload_champion_model, get_champion_version
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
