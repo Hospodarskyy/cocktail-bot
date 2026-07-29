@@ -89,39 +89,50 @@ def export_data_to_s3(**context):
 # ---------------------------------------------------------------------------
 
 def _run_training_job(entry_point, hyperparameters):
+    import shutil
     import subprocess
+    import tempfile
 
-    repo_path = "/tmp/train-code"
-    subprocess.run(["rm", "-rf", repo_path], check=True)
-    subprocess.run(
-        ["git", "clone", "--depth=1", "--branch", GITHUB_BRANCH, GITHUB_REPO, repo_path],
-        check=True,
-    )
+    # A unique directory per call, NOT a hardcoded shared path: this function
+    # runs concurrently from 4 parallel tasks (train_svd/als/bpr/tuned) inside
+    # the same airflow-scheduler container, and a shared path caused one
+    # task's `rm -rf` to race with another task's `git clone` mid-flight.
+    repo_path = tempfile.mkdtemp(prefix="train-code-")
+    try:
+        subprocess.run(
+            ["git", "clone", "--depth=1", "--branch", GITHUB_BRANCH, GITHUB_REPO, repo_path],
+            check=True,
+        )
 
-    import boto3 as _boto3
-    import sagemaker
-    from sagemaker.sklearn.estimator import SKLearn
+        import boto3 as _boto3
+        import sagemaker
+        from sagemaker.sklearn.estimator import SKLearn
 
-    boto_session = _boto3.Session(region_name=SAGEMAKER_TRAINING_REGION)
-    sagemaker_session = sagemaker.Session(boto_session=boto_session)
+        boto_session = _boto3.Session(region_name=SAGEMAKER_TRAINING_REGION)
+        sagemaker_session = sagemaker.Session(boto_session=boto_session)
 
-    estimator = SKLearn(
-        entry_point=entry_point,
-        source_dir=f"{repo_path}/training",
-        role=os.getenv("SAGEMAKER_ROLE_ARN"),
-        instance_type="ml.m5.large",
-        instance_count=1,
-        framework_version="1.2-1",
-        py_version="py3",
-        sagemaker_session=sagemaker_session,
-        hyperparameters=hyperparameters,
-        environment={
-            "MLFLOW_TRACKING_URI": os.getenv("MLFLOW_TRACKING_URI"),
-            "DATASET_BUCKET": DATASET_BUCKET,
-            "AWS_DEFAULT_REGION": AWS_REGION,
-        },
-    )
-    estimator.fit()
+        estimator = SKLearn(
+            entry_point=entry_point,
+            source_dir=f"{repo_path}/training",
+            role=os.getenv("SAGEMAKER_ROLE_ARN"),
+            instance_type="ml.m5.large",
+            instance_count=1,
+            framework_version="1.2-1",
+            py_version="py3",
+            sagemaker_session=sagemaker_session,
+            hyperparameters=hyperparameters,
+            environment={
+                "MLFLOW_TRACKING_URI": os.getenv("MLFLOW_TRACKING_URI"),
+                "DATASET_BUCKET": DATASET_BUCKET,
+                "AWS_DEFAULT_REGION": AWS_REGION,
+            },
+        )
+        estimator.fit()
+    finally:
+        # Clean up so repeated DAG runs don't slowly fill up the scheduler
+        # container's disk with old clones (this is exactly what caused the
+        # "no space left on device" build failure earlier).
+        shutil.rmtree(repo_path, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------
