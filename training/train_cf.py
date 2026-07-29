@@ -254,13 +254,19 @@ def evaluate_all_k(recommend_fn, test_by_user, k_values=K_VALUES):
 # MLflow logging + champion-challenger
 # ---------------------------------------------------------------------------
 
-def log_model_run(run_name, model_obj, params, metrics_dict):
+def log_model_run(run_name, model_obj, params, metrics_dict, items, users, train_matrix):
     with mlflow.start_run(run_name=run_name):
         mlflow.log_params(params)
         mlflow.log_metrics(metrics_dict)
 
+        # Bundle the model together with the item/user index and the train
+        # matrix (ALS/BPR's .recommend() needs it to exclude already-seen
+        # items) so the serving side has everything required to translate
+        # matrix positions back into real cocktail_ids for a given user_id.
+        package = {"cf": model_obj, "items": items, "users": users, "train_matrix": train_matrix}
+
         local_path = f"/tmp/{run_name}.joblib"
-        joblib.dump(model_obj, local_path)
+        joblib.dump(package, local_path)
         mlflow.log_artifact(local_path, artifact_path="model")
 
         run_id = mlflow.active_run().info.run_id
@@ -334,27 +340,30 @@ def main():
         "used_synthetic_bootstrap": used_synthetic,
     }
 
+    def log(run_name, model_obj, params, metrics_dict):
+        return log_model_run(run_name, model_obj, params, metrics_dict, items, users, train_matrix)
+
     results = []
 
     # --- Popularity baseline ---
     pop_model = train_popularity(train_matrix)
     metrics = evaluate_all_k(lambda u, k: recommend_popularity(pop_model, u, k), test_by_user)
-    results.append(log_model_run("popularity", pop_model, {**base_params, "algorithm": "popularity"}, metrics))
+    results.append(log("popularity", pop_model, {**base_params, "algorithm": "popularity"}, metrics))
 
     # --- SVD ---
     svd_model = train_svd(train_matrix)
     metrics = evaluate_all_k(lambda u, k: recommend_svd(svd_model, u, k), test_by_user)
-    results.append(log_model_run("svd", svd_model, {**base_params, "algorithm": "svd", "factors": N_FACTORS}, metrics))
+    results.append(log("svd", svd_model, {**base_params, "algorithm": "svd", "factors": N_FACTORS}, metrics))
 
     # --- ALS (default params) ---
     als_model = train_als(train_matrix)
     metrics = evaluate_all_k(lambda u, k: recommend_als(als_model, train_matrix, u, k), test_by_user)
-    results.append(log_model_run("als", als_model, {**base_params, "algorithm": "als", "factors": N_FACTORS}, metrics))
+    results.append(log("als", als_model, {**base_params, "algorithm": "als", "factors": N_FACTORS}, metrics))
 
     # --- BPR (default params) ---
     bpr_model = train_bpr(train_matrix)
     metrics = evaluate_all_k(lambda u, k: recommend_bpr(bpr_model, train_matrix, u, k), test_by_user)
-    results.append(log_model_run("bpr", bpr_model, {**base_params, "algorithm": "bpr", "factors": N_FACTORS}, metrics))
+    results.append(log("bpr", bpr_model, {**base_params, "algorithm": "bpr", "factors": N_FACTORS}, metrics))
 
     # --- Hyperparameter tuning: grid search over ALS and BPR ---
     best_tuned = None  # (algo, factors, reg, precision_at_5, model_obj)
@@ -376,7 +385,7 @@ def main():
         else (lambda u, k: recommend_bpr(tuned_model, train_matrix, u, k))
     )
     metrics = evaluate_all_k(recommend_tuned, test_by_user)
-    results.append(log_model_run(
+    results.append(log(
         f"{tuned_algo}_tuned", tuned_model,
         {**base_params, "algorithm": tuned_algo, "factors": tuned_factors, "regularization": tuned_reg},
         metrics
