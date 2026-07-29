@@ -107,6 +107,7 @@ services:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres_airflow/airflow_db
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__WEBSERVER__SECRET_KEY: secret
       _PIP_ADDITIONAL_REQUIREMENTS: "boto3 pandas psycopg2-binary sagemaker"
       DB_HOST: ${DB_HOST}
       DB_PORT: ${DB_PORT:-5432}
