@@ -16,7 +16,10 @@ Run inside a SageMaker Training Job or a plain Airflow PythonOperator
 
 import argparse
 
-from training import common
+try:
+    from training import common  # local dev / tests: training/ is an importable package
+except ImportError:
+    import common  # inside SageMaker: source_dir=training/ flattens it, common.py is a sibling file
 
 
 def main():
