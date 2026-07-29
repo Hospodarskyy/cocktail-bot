@@ -311,6 +311,10 @@ def register_if_champion(client, run_id, metric_value, model_name=MODEL_REGISTRY
 # ---------------------------------------------------------------------------
 
 def main():
+    mlflow_region = os.getenv("AWS_DEFAULT_REGION", "eu-central-1")
+    os.environ["AWS_REGION"] = mlflow_region
+    os.environ["AWS_DEFAULT_REGION"] = mlflow_region
+
     tracking_uri = os.getenv("MLFLOW_TRACKING_URI")
     if not tracking_uri:
         raise RuntimeError("MLFLOW_TRACKING_URI environment variable is required")
