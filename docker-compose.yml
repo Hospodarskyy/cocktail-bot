@@ -61,12 +61,13 @@ services:
       - api
 
   airflow-init:
-    image: apache/airflow:2.9.0
+    build:
+      context: .
+      dockerfile: airflow.Dockerfile
     environment:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres_airflow/airflow_db
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-      _PIP_ADDITIONAL_REQUIREMENTS: "boto3 pandas psycopg2-binary"
     depends_on:
       postgres_airflow:
         condition: service_healthy
@@ -84,14 +85,15 @@ services:
           --email admin@example.com
 
   airflow-webserver:
-    image: apache/airflow:2.9.0
+    build:
+      context: .
+      dockerfile: airflow.Dockerfile
     environment:
       AIRFLOW__WEBSERVER__WORKERS: 1
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres_airflow/airflow_db
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__WEBSERVER__SECRET_KEY: secret
-      _PIP_ADDITIONAL_REQUIREMENTS: "boto3 pandas psycopg2-binary"
     ports:
       - "8080:8080"
     volumes:
@@ -101,14 +103,15 @@ services:
     command: webserver
 
   airflow-scheduler:
-    image: apache/airflow:2.9.0
+    build:
+      context: .
+      dockerfile: airflow.Dockerfile
     environment:
       AIRFLOW__SCHEDULER__PARSING_PROCESSES: 1
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres_airflow/airflow_db
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__WEBSERVER__SECRET_KEY: secret
-      _PIP_ADDITIONAL_REQUIREMENTS: "boto3 pandas psycopg2-binary sagemaker"
       DB_HOST: ${DB_HOST}
       DB_PORT: ${DB_PORT:-5432}
       DB_NAME: ${DB_NAME:-cocktail_db}
