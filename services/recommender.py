@@ -72,16 +72,16 @@ def recommend_cf(user_id: int, top_k: int = 5, exclude_ids: list[int] | None = N
     algo = cf_model["type"]
 
     if algo == "popularity":
-        from training.train_cf import recommend_popularity
+        from training.common import recommend_popularity
         raw_recs = recommend_popularity(cf_model, user_idx, pool_k)
     elif algo == "svd":
-        from training.train_cf import recommend_svd
+        from training.common import recommend_svd
         raw_recs = recommend_svd(cf_model, user_idx, pool_k)
     elif algo == "als":
-        from training.train_cf import recommend_als
+        from training.common import recommend_als
         raw_recs = recommend_als(cf_model, train_matrix, user_idx, pool_k)
     elif algo == "bpr":
-        from training.train_cf import recommend_bpr
+        from training.common import recommend_bpr
         raw_recs = recommend_bpr(cf_model, train_matrix, user_idx, pool_k)
     else:
         return None
