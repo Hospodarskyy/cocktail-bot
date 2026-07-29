@@ -106,19 +106,23 @@ def _run_training_job(entry_point, hyperparameters):
 
         import boto3 as _boto3
         import sagemaker
-        from sagemaker.sklearn.estimator import SKLearn
+        # Not using PyTorch itself — this container is just a convenient way
+        # to get Python 3.10+. The built-in SKLearn container tops out at
+        # Python 3.9, but our pinned mlflow==3.10.1 (matching the MLflow App's
+        # server version) requires Python >=3.10, so SKLearn can't host it.
+        from sagemaker.pytorch.estimator import PyTorch
 
         boto_session = _boto3.Session(region_name=SAGEMAKER_TRAINING_REGION)
         sagemaker_session = sagemaker.Session(boto_session=boto_session)
 
-        estimator = SKLearn(
+        estimator = PyTorch(
             entry_point=entry_point,
             source_dir=f"{repo_path}/training",
             role=os.getenv("SAGEMAKER_ROLE_ARN"),
             instance_type="ml.m5.large",
             instance_count=1,
-            framework_version="1.2-1",
-            py_version="py3",
+            framework_version="2.1.0",
+            py_version="py310",
             sagemaker_session=sagemaker_session,
             hyperparameters=hyperparameters,
             environment={
