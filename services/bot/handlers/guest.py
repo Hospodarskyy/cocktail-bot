@@ -3,7 +3,7 @@ from telegram.ext import ContextTypes
 from services.bot.api_client import onboard, recommend, recommend_session, place_order, send_feedback, get_user
 from services.bot.keyboards import (
     cocktail_keyboard, order_preferences_keyboard, guest_reply_keyboard, qa_options_keyboard,
-    GUEST_BUTTON_RECOMMEND, GUEST_BUTTON_QA, GUEST_BUTTON_FULLMENU
+    show_more_keyboard, GUEST_BUTTON_RECOMMEND, GUEST_BUTTON_QA, GUEST_BUTTON_FULLMENU
 )
 from services.bot import llm_openai as llm
 from services.format_recipe import format_ingredients_list
@@ -19,22 +19,53 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def _confirm_order(reply_to):
     await reply_to("Order sent to the bar! 🍸 Anything else to order?")
 
-async def _send_recommendations(reply_to, context, user_id, session_preferences=None):
-    shown = context.user_data.setdefault("shown_cocktail_ids", set())
-    if session_preferences:
-        results = recommend_session(session_preferences, top_k=5, exclude_ids=list(shown))
-    else:
-        results = recommend(user_id, top_k=5, exclude_ids=list(shown))
+FETCH_POOL_SIZE = 20
+DISPLAY_BATCH_SIZE = 5
 
-    if not results:
+async def _send_recommendations(reply_to, context, user_id, session_preferences=None):
+    context.user_data["last_session_preferences"] = session_preferences
+    shown = context.user_data.setdefault("shown_cocktail_ids", set())
+
+    pool = context.user_data.get("recommendation_pool", [])
+    repeated = False
+
+    if not pool:
+        # Pool empty (first call, or we've served everything fetched so far)
+        # — fetch a fresh batch of up to FETCH_POOL_SIZE, not just 5, so
+        # subsequent "Show more" taps can be served from this same pool
+        # without another API/LLM round-trip.
+        if session_preferences:
+            pool = recommend_session(session_preferences, top_k=FETCH_POOL_SIZE, exclude_ids=list(shown))
+        else:
+            pool = recommend(user_id, top_k=FETCH_POOL_SIZE, exclude_ids=list(shown))
+
+        if not pool and shown:
+            # Empty here could mean "nothing feasible left that we haven't
+            # already shown this conversation" rather than genuinely empty
+            # stock — retry without the already-shown exclusion before
+            # giving up, so the guest isn't stuck just because the session
+            # ran long.
+            if session_preferences:
+                pool = recommend_session(session_preferences, top_k=FETCH_POOL_SIZE, exclude_ids=[])
+            else:
+                pool = recommend(user_id, top_k=FETCH_POOL_SIZE, exclude_ids=[])
+            repeated = bool(pool)
+
+    if not pool:
         await reply_to("Sorry, nothing matches what's currently in stock — check back after a restock!")
         return
+
+    results = pool[:DISPLAY_BATCH_SIZE]
+    context.user_data["recommendation_pool"] = pool[DISPLAY_BATCH_SIZE:]
 
     # reply_to is a bound method (update.message.reply_text) — .__self__ gets
     # us back to the underlying Message object so we can also call
     # .reply_photo on it, without threading a second parameter through every
     # caller of _send_recommendations.
     message = reply_to.__self__
+
+    if repeated:
+        await message.reply_text("You've seen all our current suggestions — here they are again!")
 
     for cocktail in results:
         shown.add(cocktail["id"])
@@ -45,6 +76,15 @@ async def _send_recommendations(reply_to, context, user_id, session_preferences=
             caption=f"🍹 {cocktail['name']}",
             reply_markup=cocktail_keyboard(cocktail["id"]),
         )
+
+    await message.reply_text("Want to see more options?", reply_markup=show_more_keyboard())
+
+async def handle_show_more(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_chat.id
+    session_preferences = context.user_data.get("last_session_preferences")
+    await _send_recommendations(query.message.reply_text, context, user_id, session_preferences=session_preferences)
 
 async def handle_recommend(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop("awaiting", None)
@@ -57,6 +97,8 @@ async def handle_recommend(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _send_recommendations(update.message.reply_text, context, user_id)
 
 async def _start_qa(reply_to, context, user_id, name, first_answer):
+    context.user_data["shown_cocktail_ids"] = set()
+    context.user_data.pop("recommendation_pool", None)
     context.user_data["qa_history"] = []
     context.user_data["qa_turns"] = 0
     context.user_data["awaiting"] = "qa"
