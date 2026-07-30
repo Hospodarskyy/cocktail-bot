@@ -142,3 +142,8 @@ def guest_reply_keyboard():
 def qa_options_keyboard(options):
     buttons = [[InlineKeyboardButton(option, callback_data=f"qa:{i}")] for i, option in enumerate(options)]
     return InlineKeyboardMarkup(buttons)
+
+def show_more_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 Show more", callback_data="showmore")]
+    ])

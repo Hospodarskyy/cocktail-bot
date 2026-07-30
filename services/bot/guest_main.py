@@ -25,6 +25,7 @@ def main():
     app.add_handler(CommandHandler("qa", guest.handle_qa_start))
     app.add_handler(CommandHandler("menu", guest.handle_fullmenu))
     app.add_handler(CallbackQueryHandler(guest.handle_qa_answer, pattern=r"^qa:"))
+    app.add_handler(CallbackQueryHandler(guest.handle_show_more, pattern=r"^showmore$"))
     app.add_handler(CallbackQueryHandler(guest.handle_callback, pattern=r"^(order|skip|confirm|writeprefs):"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, guest.handle_text))
 
