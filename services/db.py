@@ -32,6 +32,7 @@ def init_db():
 
     cur.execute("ALTER TABLE cocktails ADD COLUMN IF NOT EXISTS required_ingredients TEXT[];")
     cur.execute("ALTER TABLE cocktails ADD COLUMN IF NOT EXISTS categories TEXT[];")
+    cur.execute("ALTER TABLE cocktails ADD COLUMN IF NOT EXISTS image_url TEXT;")
 
     cur.execute("""
         CREATE TABLE IF NOT EXISTS users (

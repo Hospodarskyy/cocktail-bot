@@ -7,6 +7,7 @@ from services.bot.keyboards import (
 )
 from services.bot import llm_openai as llm
 from services.format_recipe import format_ingredients_list
+from services.image_service import get_or_generate_image
 
 MENU_TEXT = "What would you like to do?"
 DEFAULT_PREFERENCES = "no strong preferences, open to suggestions"
@@ -29,12 +30,21 @@ async def _send_recommendations(reply_to, context, user_id, session_preferences=
         await reply_to("Sorry, nothing matches what's currently in stock — check back after a restock!")
         return
 
+    # reply_to is a bound method (update.message.reply_text) — .__self__ gets
+    # us back to the underlying Message object so we can also call
+    # .reply_photo on it, without threading a second parameter through every
+    # caller of _send_recommendations.
+    message = reply_to.__self__
+
     for cocktail in results:
         shown.add(cocktail["id"])
-        text = f"🍹 {cocktail['name']}\n{format_ingredients_list(cocktail['ingredients'])}"
-        if cocktail.get("vibe"):
-            text += f"\n\n{cocktail['vibe']}"
-        await reply_to(text, reply_markup=cocktail_keyboard(cocktail["id"]))
+        ingredients_text = format_ingredients_list(cocktail["ingredients"])
+        image_url = get_or_generate_image(cocktail["id"], cocktail["name"], ingredients_text)
+        await message.reply_photo(
+            photo=image_url,
+            caption=f"🍹 {cocktail['name']}",
+            reply_markup=cocktail_keyboard(cocktail["id"]),
+        )
 
 async def handle_recommend(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop("awaiting", None)

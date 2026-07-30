@@ -56,6 +56,7 @@ services:
       - API_BASE_URL=http://api:8000
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ARK_API_KEY=${ARK_API_KEY}
     command: ["uv", "run", "python", "-m", "services.bot.guest_main"]
     depends_on:
       - api
