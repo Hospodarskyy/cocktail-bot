@@ -1,3 +1,4 @@
+import os
 import pandas as pd
 from .db import get_connection
 
@@ -7,18 +8,21 @@ def load_hotaling_data(csv_path: str):
     df = df.dropna(subset=["Cocktail Name", "Ingredients"])
     df = df.fillna("")
 
+    limit = os.getenv("COCKTAIL_LOAD_LIMIT")
+    if limit:
+        df = df.head(int(limit))
+
     conn = get_connection()
     cur = conn.cursor()
 
     inserted = 0
     for _, row in df.iterrows():
         cur.execute("""
-            INSERT INTO cocktails (name, category, ingredients, garnish, instructions)
-            VALUES (%s, %s, %s, %s, %s)
+            INSERT INTO cocktails (name, ingredients, garnish, instructions)
+            VALUES (%s, %s, %s, %s)
             ON CONFLICT DO NOTHING
         """, (
             row["Cocktail Name"],
-            row.get("Bar/Company", ""),
             row["Ingredients"],
             row.get("Garnish", ""),
             row.get("Preparation", "")

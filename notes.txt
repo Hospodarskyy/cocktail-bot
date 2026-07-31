@@ -1,0 +1,25 @@
+cocktail bot. 
+
+- for admin - "Users" should show latest and most popular cocktails instead of user profile
+- for admin - add button "🔄 Adapt Recipe"
+- for admin - when order received there should be better ui and instructions. also add the story about that cocktail. (probably everything on LLM side). should already be adapted for user preference
+- for admin - when update stock - not just a new value, free text like "add 2 litres of orange juice" should add to current stock
+- for admin - new functionality "Plan the evening" - asks when and what guests are going to attend, plan how much ingredients to buy additionally to current stock based on guests and/or most ordered drinks per evening, create a calendar reminder with notification 
+- for admin - for "Users" new button - clear a user preferences. 
+- for admin - filter the telegram account that can be admins
+- for admin - sometimes guest don't use this program to order, just with words. so admin should be able to create order from admin panel for them by first selecting guest, then selecting cocktail, both from lists buttons
+- for admin - when looking through the inventory, I like how you can press next for new section, not flood the telegram ui. but can these section  divide by groups like Base spirits, Liqueurs, Bitters, Juices etc?
+
+
+
+- for guest - when writing preference for order, menu collapses and doesn't show up again
+- for guest - change button name from "Recommend me something" to "Personal recommendations"
+- for guest - add button "My history" that returns most ordered cocktails and last n ordered
+- for guest - when order ready - after some time receive message to rate a cocktail (or the next day with the whole list of ordered drinks to rate)
+- for guest - maybe qna not so vague, a bit more specific. prompt changes
+- for guest - maybe some langgraph logic where if specific request - then just minimal specific questions and give recommendations; if help with decision - more detailed approach (if this is not an overkill); if very specific like "I want old fashion" - just show it and few very close.
+- for guest - time and temperature info added to recommend me something. Maybe new section under personal recommendations, something like you might want to try these because ... (should be written with professionalism of real bartender encouraging, but short)
+
+
+
+- language switch from admin (ukr/en)

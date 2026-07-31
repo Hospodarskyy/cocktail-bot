@@ -1,4 +1,4 @@
-FROM python:3.14-slim
+FROM python:3.12-slim
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
@@ -9,14 +9,7 @@ RUN uv sync --frozen --no-dev
 
 COPY . .
 
-ARG KAGGLE_USERNAME
-ARG KAGGLE_KEY
-RUN pip install kaggle && \
-    mkdir -p /root/.kaggle && \
-    echo "{\"username\":\"$KAGGLE_USERNAME\",\"key\":\"$KAGGLE_KEY\"}" > /root/.kaggle/kaggle.json && \
-    chmod 600 /root/.kaggle/kaggle.json && \
-    mkdir -p data && \
-    kaggle datasets download -d shuyangli94/cocktails-hotaling-co -p data --unzip
+RUN mkdir -p data
 
 EXPOSE 8000
 

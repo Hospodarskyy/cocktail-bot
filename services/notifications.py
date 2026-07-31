@@ -1,7 +1,7 @@
 import os
 import requests
 
-def notify_admin(text: str, reply_markup: dict | None = None):
+def notify_admin(text: str, reply_markup: dict | None = None, parse_mode: str | None = None):
     bot_token = os.getenv("ADMIN_BOT_TOKEN")
     chat_id = os.getenv("ADMIN_CHAT_ID")
 
@@ -12,6 +12,8 @@ def notify_admin(text: str, reply_markup: dict | None = None):
     payload = {"chat_id": chat_id, "text": text}
     if reply_markup:
         payload["reply_markup"] = reply_markup
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
 
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     requests.post(url, json=payload, timeout=10)

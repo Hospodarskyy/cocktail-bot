@@ -1,15 +1,4 @@
 services:
-  postgres:
-    image: pgvector/pgvector:pg16
-    environment:
-      POSTGRES_USER: cocktail
-      POSTGRES_PASSWORD: cocktail
-      POSTGRES_DB: cocktail_db
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-
   postgres_airflow:
     image: postgres:16
     environment:
@@ -23,40 +12,63 @@ services:
       interval: 10s
       retries: 5
 
-  minio:
-    image: minio/minio
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
-    command: server /data --console-address ":9001"
-    volumes:
-      - minio_data:/data
-
   api:
     build:
       context: .
-      args:
-        KAGGLE_USERNAME: ${KAGGLE_USERNAME}
-        KAGGLE_KEY: ${KAGGLE_KEY}
     ports:
       - "8000:8000"
     environment:
-      - DB_HOST=postgres
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_NAME=${DB_NAME:-cocktail_db}
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_SSLMODE=${DB_SSLMODE:-require}
       - ADMIN_BOT_TOKEN=${ADMIN_BOT_TOKEN}
       - ADMIN_CHAT_ID=${ADMIN_CHAT_ID}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - DATASET_BUCKET=${DATASET_BUCKET:-cocktail-mlops-data-oles}
+      - DATASET_KEY=${DATASET_KEY:-datasets/cocktail-dataset.csv}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-eu-central-1}
+      - MLFLOW_TRACKING_URI=${MLFLOW_TRACKING_URI}
+
+  admin_bot:
+    build:
+      context: .
+    environment:
+      - ADMIN_BOT_TOKEN=${ADMIN_BOT_TOKEN}
+      - ADMIN_USER_IDS=${ADMIN_USER_IDS}
+      - ADMIN_CHAT_ID=${ADMIN_CHAT_ID}
+      - API_BASE_URL=http://api:8000
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+    command: ["uv", "run", "python", "-m", "services.bot.admin_main"]
     depends_on:
-      - postgres
+      - api
+
+  guest_bot:
+    build:
+      context: .
+    environment:
+      - GUEST_BOT_TOKEN=${GUEST_BOT_TOKEN}
+      - API_BASE_URL=http://api:8000
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ARK_API_KEY=${ARK_API_KEY}
+    command: ["uv", "run", "python", "-m", "services.bot.guest_main"]
+    depends_on:
+      - api
 
   airflow-init:
-    image: apache/airflow:2.9.0
+    build:
+      context: .
+      dockerfile: airflow.Dockerfile
     environment:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres_airflow/airflow_db
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-      _PIP_ADDITIONAL_REQUIREMENTS: "boto3 pandas psycopg2-binary"
     depends_on:
       postgres_airflow:
         condition: service_healthy
@@ -74,13 +86,15 @@ services:
           --email admin@example.com
 
   airflow-webserver:
-    image: apache/airflow:2.9.0
+    build:
+      context: .
+      dockerfile: airflow.Dockerfile
     environment:
+      AIRFLOW__WEBSERVER__WORKERS: 1
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres_airflow/airflow_db
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__WEBSERVER__SECRET_KEY: secret
-      _PIP_ADDITIONAL_REQUIREMENTS: "boto3 pandas psycopg2-binary"
     ports:
       - "8080:8080"
     volumes:
@@ -90,12 +104,27 @@ services:
     command: webserver
 
   airflow-scheduler:
-    image: apache/airflow:2.9.0
+    build:
+      context: .
+      dockerfile: airflow.Dockerfile
     environment:
+      AIRFLOW__SCHEDULER__PARSING_PROCESSES: 1
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres_airflow/airflow_db
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-      _PIP_ADDITIONAL_REQUIREMENTS: "boto3 pandas psycopg2-binary"
+      AIRFLOW__WEBSERVER__SECRET_KEY: secret
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME:-cocktail_db}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_SSLMODE: ${DB_SSLMODE:-require}
+      DATASET_BUCKET: ${DATASET_BUCKET:-cocktail-mlops-data-oles}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-eu-central-1}
+      SAGEMAKER_ROLE_ARN: ${SAGEMAKER_ROLE_ARN}
+      MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI}
     volumes:
       - ./dags:/opt/airflow/dags
     depends_on:
@@ -103,6 +132,4 @@ services:
     command: scheduler
 
 volumes:
-  postgres_data:
-  minio_data:
   airflow_postgres_data:

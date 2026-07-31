@@ -4,3 +4,7 @@ __pycache__/
 data/
 models/
 .env
+aws/
+awscliv2.zip
+*.pem
+~WRL1283.tmp
