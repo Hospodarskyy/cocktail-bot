@@ -1,33 +1,3 @@
-"""
-Single end-to-end training pipeline, replacing the previous two separate
-DAGs (`export_orders_to_s3` + `train_cf_pipeline`).
-
-    export_data_to_s3
-            |
-      preprocess_data
-            |
-    +-------+-------+-------+
-train_svd train_als train_bpr train_tuned   <- parallel, independent
-    +-------+-------+-------+
-            |
-  select_and_register_champion
-
-Why one DAG instead of two: export and training are not independent
-schedules, they're two steps of the same pipeline — training must always
-run on the data that was *just* exported, not on whatever happened to be
-exported last. Splitting them into two separately-scheduled DAGs let
-`train_cf_pipeline` fire without a guarantee that `export_orders_to_s3`
-had finished first, which is exactly what happened when we triggered them
-manually out of order.
-
-Why train_svd / train_als / train_bpr / train_tuned are separate tasks:
-each is retryable independently (a transient failure in one doesn't force
-re-training the others), each shows up as its own box in Graph View for
-debugging, and since they don't depend on each other's output, Airflow
-runs them in parallel rather than wasting wall-clock time on a strictly
-sequential chain.
-"""
-
 import os
 from datetime import datetime
 from io import StringIO
@@ -40,15 +10,11 @@ from airflow.operators.python import PythonOperator
 
 DATASET_BUCKET = os.getenv("DATASET_BUCKET", "cocktail-mlops-data-oles")
 AWS_REGION = os.getenv("AWS_DEFAULT_REGION", "eu-central-1")
-SAGEMAKER_TRAINING_REGION = "us-east-1"  # eu-central-1 has zero ml.* training quota on this account
+SAGEMAKER_TRAINING_REGION = "us-east-1"  # eu-central-1 has zero ml training quota on this account
 GITHUB_BRANCH = "upgraded_tg_bot_"
 GITHUB_REPO = "https://github.com/Hospodarskyy/cocktail-bot"
 
 
-# ---------------------------------------------------------------------------
-# Task 1 — export fresh data from RDS to S3 (unchanged from the old
-# export_orders_to_s3 DAG, just moved in here as the first task)
-# ---------------------------------------------------------------------------
 
 def export_data_to_s3(**context):
     conn = psycopg2.connect(
@@ -81,22 +47,12 @@ def export_data_to_s3(**context):
           f"to s3://{DATASET_BUCKET}/order-history/")
 
 
-# ---------------------------------------------------------------------------
-# Shared helper — every remaining task runs its logic as a SageMaker
-# Training Job against a fresh git clone, same pattern as the old DAG
-# (guarantees the job runs exactly the code in GitHub, not whatever is on
-# the EC2 disk right now).
-# ---------------------------------------------------------------------------
 
 def _run_training_job(entry_point, hyperparameters):
     import shutil
     import subprocess
     import tempfile
 
-    # A unique directory per call, NOT a hardcoded shared path: this function
-    # runs concurrently from 4 parallel tasks (train_svd/als/bpr/tuned) inside
-    # the same airflow-scheduler container, and a shared path caused one
-    # task's `rm -rf` to race with another task's `git clone` mid-flight.
     repo_path = tempfile.mkdtemp(prefix="train-code-")
     try:
         subprocess.run(
@@ -106,10 +62,6 @@ def _run_training_job(entry_point, hyperparameters):
 
         import boto3 as _boto3
         import sagemaker
-        # Not using PyTorch itself — this container is just a convenient way
-        # to get Python 3.10+. The built-in SKLearn container tops out at
-        # Python 3.9, but our pinned mlflow==3.10.1 (matching the MLflow App's
-        # server version) requires Python >=3.10, so SKLearn can't host it.
         from sagemaker.pytorch.estimator import PyTorch
 
         boto_session = _boto3.Session(region_name=SAGEMAKER_TRAINING_REGION)
@@ -133,16 +85,9 @@ def _run_training_job(entry_point, hyperparameters):
         )
         estimator.fit()
     finally:
-        # Clean up so repeated DAG runs don't slowly fill up the scheduler
-        # container's disk with old clones (this is exactly what caused the
-        # "no space left on device" build failure earlier).
         shutil.rmtree(repo_path, ignore_errors=True)
 
 
-# ---------------------------------------------------------------------------
-# Task 2 — preprocess: build the train/test matrix ONCE, so every model
-# below is compared on the exact same split
-# ---------------------------------------------------------------------------
 
 def preprocess_data(**context):
     batch_id = context["run_id"]
@@ -152,9 +97,6 @@ def preprocess_data(**context):
     )
 
 
-# ---------------------------------------------------------------------------
-# Task 3 — one task per model, all independent of each other -> parallel
-# ---------------------------------------------------------------------------
 
 def _make_train_task(model_name):
     def _train(**context):
@@ -167,9 +109,6 @@ def _make_train_task(model_name):
     return _train
 
 
-# ---------------------------------------------------------------------------
-# Task 4 — compare all runs tagged with this batch_id, register champion
-# ---------------------------------------------------------------------------
 
 def select_and_register_champion(**context):
     batch_id = context["run_id"]
