@@ -1,14 +1,3 @@
-"""
-Shared library for the collaborative-filtering training pipeline.
-
-Split out of the original single-file `train_cf.py` so that three
-independent SageMaker Training Job entry points — `preprocess.py`,
-`train_single_model.py`, and `select_champion.py` — can each import
-only the functions they need without duplicating code.
-
-Nothing in this file is meant to be run directly.
-"""
-
 import os
 import random
 from collections import defaultdict
@@ -23,11 +12,11 @@ from scipy.sparse import csr_matrix
 from scipy.sparse.linalg import svds
 
 MLFLOW_EXPERIMENT = "cf_recommender_comparison"
-MODEL_REGISTRY_NAME = "cf-recommender"  # hyphens only - SageMaker Managed MLflow requirement
+MODEL_REGISTRY_NAME = "cf-recommender"
 DATASET_BUCKET = os.getenv("DATASET_BUCKET", "cocktail-mlops-data-oles")
 ORDERS_KEY = "order-history/orders.csv"
 COCKTAILS_CATEGORIES_KEY = "order-history/cocktails_categories.csv"
-MIN_REAL_ORDERS = 50          # below this, we bootstrap with synthetic orders
+MIN_REAL_ORDERS = 50
 N_SYNTHETIC_USERS = 300
 ORDERS_PER_SYNTHETIC_USER = (3, 8)
 N_FACTORS = 20
@@ -60,12 +49,6 @@ def download_joblib_from_s3(bucket, key):
     return joblib.load(local_path)
 
 
-# ---------------------------------------------------------------------------
-# Data loading (from S3 — training scripts run inside SageMaker Training Jobs,
-# which have no VPC access to RDS, so they read the CSV snapshots that the
-# `export_raw_data_to_s3` Airflow task produces instead of querying RDS directly)
-# ---------------------------------------------------------------------------
-
 def load_cocktails_with_categories():
     """Returns list of (cocktail_id, categories: list[str])."""
     df = read_csv_from_s3(COCKTAILS_CATEGORIES_KEY)
@@ -86,16 +69,6 @@ def load_real_orders():
 
 
 def synthesize_orders(cocktails_with_categories, n_users=N_SYNTHETIC_USERS):
-    """
-    Bootstraps plausible implicit-feedback orders for cold-start CF training.
-
-    Real order history is expected to be sparse for a freshly deployed bar
-    (this is a home project, not a venue with thousands of guests yet), so
-    we simulate synthetic "guests" who each prefer 1-2 cocktail categories
-    and order accordingly. This lets us exercise the full CF pipeline
-    (train/test split, matrix factorization, evaluation) end-to-end now,
-    and gets naturally replaced/diluted by real orders as the bar is used.
-    """
     random.seed(RANDOM_SEED)
 
     by_category = defaultdict(list)
@@ -121,10 +94,6 @@ def synthesize_orders(cocktails_with_categories, n_users=N_SYNTHETIC_USERS):
 
 
 def build_interaction_data():
-    """
-    Returns (interactions, used_synthetic: bool) where interactions is a
-    list of (user_id, cocktail_id) implicit-feedback pairs.
-    """
     real_orders = load_real_orders()
     if len(real_orders) >= MIN_REAL_ORDERS:
         print(f"Using {len(real_orders)} real orders (no synthetic bootstrap needed)")
@@ -136,10 +105,6 @@ def build_interaction_data():
     synthetic = synthesize_orders(cocktails)
     return real_orders + synthetic, True
 
-
-# ---------------------------------------------------------------------------
-# Matrix building + train/test split
-# ---------------------------------------------------------------------------
 
 def build_matrix(interactions):
     users = sorted({u for u, _ in interactions})
@@ -158,7 +123,6 @@ def build_matrix(interactions):
 
 
 def train_test_split_interactions(interactions):
-    """Leave-one-out style split: hold out ~TEST_FRACTION of each user's orders."""
     random.seed(RANDOM_SEED)
     by_user = defaultdict(list)
     for u, i in interactions:
@@ -186,10 +150,6 @@ def build_test_by_user(test_interactions, user_index, item_index):
             test_by_user[user_index[u]].append(item_index[i])
     return test_by_user
 
-
-# ---------------------------------------------------------------------------
-# Models
-# ---------------------------------------------------------------------------
 
 def train_popularity(train_matrix):
     popularity = np.asarray(train_matrix.sum(axis=0)).flatten()
@@ -246,10 +206,6 @@ def recommend_bpr(model, train_matrix, user_idx, k):
     return list(item_ids)
 
 
-# ---------------------------------------------------------------------------
-# Evaluation
-# ---------------------------------------------------------------------------
-
 def precision_at_k(recommend_fn, test_by_user, k=TOP_K):
     hits, total = 0, 0
     for user_idx, held_out_item_indices in test_by_user.items():
@@ -265,9 +221,6 @@ def evaluate_all_k(recommend_fn, test_by_user, k_values=K_VALUES):
     return {f"precision_at_{k}": precision_at_k(recommend_fn, test_by_user, k=k) for k in k_values}
 
 
-# ---------------------------------------------------------------------------
-# MLflow logging + champion-challenger
-# ---------------------------------------------------------------------------
 
 def set_mlflow_tracking():
     mlflow_region = os.getenv("AWS_DEFAULT_REGION", "eu-central-1")
@@ -288,15 +241,8 @@ def log_model_run(run_name, model_obj, params, metrics_dict, items, users, train
         mlflow.log_params(params)
         mlflow.log_metrics(metrics_dict)
         if batch_id:
-            # Tags this run as belonging to a specific Airflow DAG run, so that
-            # select_champion.py can later find "only the models trained in
-            # this batch" instead of comparing against the entire run history.
             mlflow.set_tag("batch_id", batch_id)
 
-        # Bundle the model together with the item/user index and the train
-        # matrix (ALS/BPR's .recommend() needs it to exclude already-seen
-        # items) so the serving side has everything required to translate
-        # matrix positions back into real cocktail_ids for a given user_id.
         package = {"cf": model_obj, "items": items, "users": users, "train_matrix": train_matrix}
 
         local_path = f"/tmp/{run_name}.joblib"
@@ -314,7 +260,7 @@ def register_if_champion(client, run_id, metric_value, model_name=MODEL_REGISTRY
     try:
         client.create_registered_model(model_name)
     except Exception:
-        pass  # already exists, that's fine
+        pass
 
     try:
         current_champion = client.get_model_version_by_alias(model_name, "champion")
@@ -325,10 +271,6 @@ def register_if_champion(client, run_id, metric_value, model_name=MODEL_REGISTRY
         current_metric = -1
 
     if metric_value > current_metric:
-        # Use create_model_version directly rather than mlflow.register_model():
-        # the latter requires a "Logged Model" entity (MLflow 3.x concept) that
-        # our simple log_artifact() calls don't create, and fails against
-        # SageMaker Managed MLflow with "Unable to find a logged_model".
         new_version = client.create_model_version(name=model_name, source=model_uri, run_id=run_id)
         client.set_registered_model_alias(model_name, "champion", new_version.version)
         print(f"New champion: version {new_version.version} "

@@ -1,27 +1,11 @@
-"""
-Compares all models trained in one Airflow DAG run and registers the best
-one as "champion" in the MLflow Model Registry, if it beats the current
-champion.
-
-Runs AFTER the parallel train_svd / train_als / train_bpr / train_tuned
-tasks all finish. Finds "this batch's" runs via the `batch_id` MLflow tag
-that train_single_model.py sets on every run — without it, this would
-have no way to distinguish today's candidates from the entire run history.
-
-Run inside a SageMaker Training Job or a plain Airflow PythonOperator:
-    export MLFLOW_TRACKING_URI=...
-    python -m training.select_champion --batch-id <airflow_run_id>
-"""
-
 import argparse
 
 import mlflow
 
 try:
-    from training import common  # local dev / tests: training/ is an importable package
+    from training import common
 except ImportError:
-    import common  # inside SageMaker: source_dir=training/ flattens it, common.py is a sibling file
-
+    import common
 
 def main():
     parser = argparse.ArgumentParser()

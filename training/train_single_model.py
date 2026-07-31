@@ -1,28 +1,12 @@
-"""
-Trains exactly ONE collaborative-filtering model and logs it to MLflow.
-
-This is the entry point for each of the parallel SageMaker Training Job
-tasks (train_svd / train_als / train_bpr / train_tuned) in the Airflow
-DAG. It does NOT decide the champion — that comparison happens once, in
-select_champion.py, after all parallel branches have finished.
-
-Run inside a SageMaker Training Job (hyperparameters become CLI args
-automatically), or manually:
-    export MLFLOW_TRACKING_URI=...
-    export DATASET_BUCKET=cocktail-mlops-data-oles
-    python -m training.train_single_model --model als --data-key processed/<batch_id>/data.joblib --batch-id <batch_id>
-"""
-
 import argparse
 
 try:
-    from training import common  # local dev / tests: training/ is an importable package
+    from training import common 
 except ImportError:
-    import common  # inside SageMaker: source_dir=training/ flattens it, common.py is a sibling file
+    import common
 
 
 def _train_and_evaluate(model_name, train_matrix, test_by_user):
-    """Returns (model_obj, params, metrics_dict) for a given model name."""
     if model_name == "popularity":
         model = common.train_popularity(train_matrix)
         metrics = common.evaluate_all_k(lambda u, k: common.recommend_popularity(model, u, k), test_by_user)
@@ -52,10 +36,7 @@ def _train_and_evaluate(model_name, train_matrix, test_by_user):
         return model, params, metrics
 
     if model_name == "tuned":
-        # Grid search across ALS and BPR together, same as the original
-        # single-script pipeline — kept as one combined task since the two
-        # loops share the same grid and are cheap compared to a full job.
-        best = None  # (algo, factors, reg, score, model_obj)
+        best = None
         for factors in common.TUNING_GRID["factors"]:
             for reg in common.TUNING_GRID["regularization"]:
                 als_candidate = common.train_als(train_matrix, n_factors=factors, regularization=reg)

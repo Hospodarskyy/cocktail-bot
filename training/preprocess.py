@@ -1,25 +1,9 @@
-"""
-Builds the train/test interaction matrix once and uploads it to S3.
-
-Runs as a single task between `export_raw_data_to_s3` and the parallel
-`train_svd` / `train_als` / `train_bpr` / `train_tuned` tasks. Doing this
-once — rather than letting every parallel training task rebuild the
-matrix independently — guarantees all models are compared on the exact
-same train/test split, and avoids repeating the same S3 read + matrix
-build three times.
-
-Run inside a SageMaker Training Job or a plain Airflow PythonOperator
-(this step is cheap CPU work, no GPU/heavy compute needed):
-    export DATASET_BUCKET=cocktail-mlops-data-oles
-    python -m training.preprocess --batch-id <airflow_run_id>
-"""
-
 import argparse
 
 try:
-    from training import common  # local dev / tests: training/ is an importable package
+    from training import common
 except ImportError:
-    import common  # inside SageMaker: source_dir=training/ flattens it, common.py is a sibling file
+    import common
 
 
 def main():
@@ -51,8 +35,6 @@ def main():
     data_key = f"processed/{args.batch_id}/data.joblib"
     common.upload_joblib_to_s3(package, common.DATASET_BUCKET, data_key)
 
-    # Printed so Airflow's PythonOperator can push it to XCom via return value,
-    # and so a SageMaker Training Job's CloudWatch logs show it if run that way.
     print(f"Uploaded preprocessed data to s3://{common.DATASET_BUCKET}/{data_key}")
     print(f"DATA_KEY={data_key}")
     return data_key
