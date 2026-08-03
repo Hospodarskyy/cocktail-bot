@@ -2,6 +2,8 @@ import os
 from datetime import datetime
 from io import StringIO
 
+from fastapi import requests
+
 import boto3
 import pandas as pd
 import psycopg2
@@ -116,6 +118,13 @@ def select_and_register_champion(**context):
         entry_point="select_champion.py",
         hyperparameters={"batch-id": batch_id},
     )
+
+    try:
+        response = requests.post("http://api:8000/admin/reload-model", timeout=30)
+        response.raise_for_status()
+        print(f"API reloaded champion model: {response.json()}")
+    except Exception as e:
+        print(f"WARNING: failed to notify API to reload champion model: {e}")
 
 
 with DAG(

@@ -42,6 +42,14 @@ async def lifespan(app: FastAPI):
     generate_embeddings()
     generate_inventory_categories()
 
+    try:
+        reload_champion_model()
+    except Exception as e:
+        # Don't crash API startup if MLflow/registry is unreachable or no
+        # champion has ever been registered yet — CF simply stays
+        # unavailable and recommend() falls back to CBF, same as before.
+        print(f"Could not load champion model at startup: {e}")
+
     yield
 
 app = FastAPI(title="Cocktail Recommender API", lifespan=lifespan)
@@ -208,3 +216,8 @@ def clear_user_preferences(user_id: int):
 def add_cocktail(request: CocktailCreateRequest):
     cocktail_id = create_cocktail(request.name, request.ingredients, request.garnish, request.instructions)
     return {"cocktail_id": cocktail_id, "name": request.name}
+
+@app.post("/admin/reload-model")
+def reload_model():
+    version = reload_champion_model()
+    return {"status": "ok", "champion_version": version}
